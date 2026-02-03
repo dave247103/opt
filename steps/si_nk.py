@@ -13,6 +13,6 @@ k=b[:,1]
 
 @material.simple()
 class Si_Shinke(material.Material):
-    def Nr(self,lam,T=300.,n=0.): x=float(lam); return np.interp(x,wl,nr)+1j*np.interp(x,wl,k)
-    def nr(self,lam,T=300.,n=0.): return float(np.interp(float(lam),wl,nr))
-    def absp(self,lam,T=300.): x=float(lam); return 4*np.pi*np.interp(x,wl,k)*1e7/x
+    def Nr(self,lam,T=295.,n=0.): x=float(lam); return np.interp(x,wl,nr)+1j*np.interp(x,wl,k)
+    def nr(self,lam,T=295.,n=0.): return float(np.interp(float(lam),wl,nr))
+    def absp(self,lam,T=295.): x=float(lam); return 4*np.pi*np.interp(x,wl,k)*1e7/x

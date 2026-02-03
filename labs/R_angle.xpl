@@ -14,13 +14,14 @@
   <material name="mySi02" base="SiO2">
     <Nr>n_layer</Nr>
   </material>
+  <module name="si_asp"/>
   <module name="si_nk"/>
 </materials>
 
 <geometry>
-  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Shinke">
+  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Aspnes">
     <stack>
-      <rectangle material="Si_Shinke" dx="1" dy="1"/>
+      <rectangle material="Si_Aspnes" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
@@ -48,12 +49,15 @@ angles = np.arange(0., 90., 0.1)        # deg
 def refl(angle, lam, polarization, side='top'):
         # OPT.ktran = 2e3 * np.pi / lam * np.sin(np.pi / 180. * angle) * material.get('mySi').nr(lam)
         OPT.ktran = 2e3 * np.pi / lam * np.sin(np.pi / 180. * angle)
-        if side == 'bottom': OPT.ktran *= material.get('mySi').nr(lam)
-        return OPT.compute_reflectivity(lam, 'bottom', polarization)
+        if side == 'bottom':
+            OPT.ktran *= material.get('Si_Aspnes').nr(lam)
+            return OPT.compute_reflectivity(lam, 'bottom', polarization)
+        else:
+            return OPT.compute_reflectivity(lam, 'top', polarization)
         #return OPT.compute_reflectivity(lam, 'top', polarization)
 
-refls_TE = [refl(angle, 550., 'TE') for angle in angles]
-refls_TM = [refl(angle, 550., 'TM') for angle in angles]
+refls_TE = [refl(angle, 550., 'TE', 'top') for angle in angles]
+refls_TM = [refl(angle, 550., 'TM', 'top') for angle in angles]
 
 plt.axhline(0, color='k', lw=0.7)
 plt.plot(angles, refls_TE, label='TE')

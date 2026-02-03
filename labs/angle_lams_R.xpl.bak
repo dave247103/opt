@@ -11,16 +11,17 @@
     <absp>0</absp>
     <nr>nref</nr>
   </material>
-  <module name="si_nk"/>
   <material name="mySi02" base="SiO2">
     <Nr>n_layer</Nr>
   </material>
+  <module name="si_nk"/>
+  <module name="si_asp"/>
 </materials>
 
 <geometry>
-  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="mySi">
+  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Shinke">
     <stack>
-      <rectangle material="SiO2" dx="1" dy="1"/>
+      <rectangle material="Si_Shinke" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
@@ -43,24 +44,25 @@ lams = np.arange(400., 700., 2.)        # nm
 
 def refl(angle, lam, polarization, side='top'):
         OPTICAL.ktran = 2e3 * np.pi / lam * np.sin(np.pi / 180. * angle)
-        if side == 'bottom': OPTICAL.ktran *= material.get('Si_Schinke').nr(lam)
-        return OPTICAL.compute_reflectivity(lam, 'bottom', polarization)
-
+        if side == 'bottom':
+            OPTICAL.ktran *= material.get('Si_Shinke').nr(lam)
+        return OPTICAL.compute_reflectivity(lam, side, polarization)
+            
 x, y = np.meshgrid(angles, lams, indexing='ij')
 refls_TE = np.zeros((size(angles), size(lams)))
-refls_TM = np.zeros((size(angles), size(lams)))
+refls_TM = np.zeros((size(angles), size(lams))) 
 
 for i, angle in enumerate(angles):
     for j, lam in enumerate(lams):
-        refls_TE[i, j] = refl(angle, lam , 'TE')
-        refls_TM[i, j] = refl(angle, lam , 'TM')
+        refls_TE[i, j] = refl(angle, lam , 'TE', 'top')
+        refls_TM[i, j] = refl(angle, lam , 'TM', 'top')
         
 cmap = plt.cm.viridis
 cmap = cmap.copy()
 cmap.set_over('white')
 
 plt.figure(figsize=(8, 6))
-heatmap = plt.pcolormesh(x, y, refls_TE, shading='auto', cmap=cmap, vmin = 0, vmax = 90)
+heatmap = plt.pcolormesh(x, y, refls_TE, shading='auto', cmap=cmap, vmin = 0, vmax = 100)
 plt.colorbar(heatmap, label='Reflectivity (%)',  extend='max')
 plt.xlabel("Angle (deg)")
 plt.ylabel("Wavelength (nm)")
