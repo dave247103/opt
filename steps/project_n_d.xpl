@@ -128,17 +128,22 @@ class GA:
             p = [f/fitness_sum for f in self.fitness_t]
             id_P = np.random.choice(len(self.fitness_t), size=len(p), p=p)
             return [self.P_t[i] for i in id_P]
-        else if alg == "tournament":
+        elif alg == "tournament":
         # TODO: tournament selection
             pass
     
-    def recombine(self, mating_pool, alg="convec"):
-        if algo = "convex":
-            pass
-        else if alg == "average":
+    def recombine(self, mating_pool, alg="convex", alpha=0.5):
+        if alg == "convex":
+            P2 = np.zeros_like(mating_pool)   
+            u = mating_pool[-1]         
+            for i, c in enumerate(mating_pool):
+                P2[i] = [alpha*u[g]+(1-alpha)*mating_pool[i][g] for g in range(4)]
+                u = mating_pool[i]   
+            return P2             
+        elif alg == "average":
         # TODO: Average Crossover
             pass
-        else if alg = "discrete":
+        elif alg == "discrete":
         # TODO: Uniform Crossover
             pass              
         
@@ -146,7 +151,9 @@ class GA:
     def run_GA(self, n_gen, patience, tol):
         while (self.t<n_gen and self.curr_patience < patience):
             P1 = GA.MP(self)
-            P2 = GA.recombine(P1)
+            print("p1: ", P1)
+            P2 = GA.recombine(self, P1)
+            print("p2: ", P2)
             # P3 = mutate(P2)
             # select(P3)
             self.t+=1
