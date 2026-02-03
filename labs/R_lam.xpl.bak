@@ -1,0 +1,53 @@
+<plask loglevel="detail">
+
+<defines>
+  <define name="nref" value="4.0"/>
+  <define name="lam_min" value="550"/>
+  <define name="n_layer" value="nref**0.5"/>
+</defines>
+
+<materials>
+  <material name="mySi" base="Si">
+    <absp>0</absp>
+    <nr>nref</nr>
+  </material>
+  <material name="mySi02" base="SiO2">
+    <Nr>n_layer</Nr>
+  </material>
+</materials>
+
+<geometry>
+  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="mySi">
+    <stack>
+      <rectangle material="mySi02" dx="1" dy="{1e-3 * lam_min / (4 * n_layer)}"/>
+      <zero/>
+      <rectangle material="mySi" dx="1" dy="1"/>
+    </stack>
+  </cartesian2d>
+</geometry>
+
+<solvers>
+  <optical name="OPT" solver="Fourier2D" lib="modal">
+    <geometry ref="main"/>
+    <expansion size="0"/>
+  </optical>
+</solvers>
+
+<script><![CDATA[
+import numpy as np
+import matplotlib.pyplot as plt
+
+lams = np.arange(400.0, 700.1, 1.0)
+
+refls = OPT.compute_reflectivity(lams, 'top', 'TE')
+
+# print_log('result', f"Reflevtivity = {refl:.2f}%")
+plt.axhline(0, color='k', lw=0.7)
+plt.axvline(550., color='b', lw=0.5)
+plt.plot(lams, refls)
+plt.xlabel("Walength (nm)")
+plt.ylabel("Reflectivity (%)")
+plt.show()
+]]></script>
+
+</plask>
