@@ -43,18 +43,20 @@ L1 = GEO.layer_SiO2
 L2 = GEO.layer_Si3N4
 eps = 5e-4
 side = "top"
-lams   = np.arange(400.0, 700.1, 20.0)  # nm
-angles = np.arange(0.0, 90.1, 10.0)      # deg
+lams   = np.arange(400.0, 700.1, 10.0)  # nm
+angles = np.arange(0.0, 90.1, 9.0)      # deg
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
 # TOTAL_MAX = 500.0           # nm
 n_bounds = (1.10, 3.40)     # (-)
-P_size= 4
+P_size= 16
 generations = 8
-patience = 5
+patience = 4
 tol = 0.1
 seed = 8
+rng = np.random.default_rng(seed)
+
 
 
 
@@ -105,7 +107,6 @@ def fitness(x):
 
 class GA:
     def __init__(self, P_size):
-        rng = np.random.default_rng(seed)
         d_0 = rng.uniform(d_bounds[0], d_bounds[1], [P_size, 2])
         n_0 = rng.uniform(n_bounds[0], n_bounds[1], [P_size, 2])
         self.t = 0
@@ -115,11 +116,7 @@ class GA:
         for i in range(P_size):
             self.P_t[i] = d_0[i][0], d_0[i][1], n_0[i][0], n_0[i][1]
         self.fitness_t = [fitness(c) for c in self.P_t]
-        # if self.y_star - sorted(y_0)[0] > tol:
-        #    self.curr_patience = 1
-        # else:
-        #     self.curr_patience += 1
-        #self.y_star = y_0[0]
+        self.y_star = sorted(self.fitness_t)[0]
     
     def MP(self, alg="roulette"):
         # roulette wheel selection
@@ -132,7 +129,8 @@ class GA:
         # TODO: tournament selection
             pass
     
-    def recombine(self, mating_pool, alg="convex", alpha=0.5):
+    def recombine(self, mating_pool, p=0.5, alg="convex", alpha=0.5):
+        # crossover probability p is used in average and uniform crossover
         if alg == "convex":
             P2 = np.zeros_like(mating_pool)   
             u = mating_pool[-1]         
@@ -145,44 +143,51 @@ class GA:
             pass
         elif alg == "discrete":
         # TODO: Uniform Crossover
-            pass              
+            pass          
         
+    def mutate(self, P2, p=0.2, alg="uniform"):
+        if alg == "uniform":
+           ps = rng.random(len(P2))
+           idx = np.where(ps > p)[0]
+           d_m = rng.uniform(d_bounds[0], d_bounds[1], [len(idx), 2])
+           n_m = rng.uniform(n_bounds[0], n_bounds[1], [len(idx), 2])
+           for j, i in enumerate(idx):
+               P2[i] = d_m[j][0], d_m[j][1], n_m[j][0], n_m[j][1]
+           return P2
+        elif alg == "flip":
+        #TODO: flip-flop mutation
+            pass           
     
+    def select(self, P3, pressure=0.5):
+        idx = np.argsort(self.fitness_t)
+        self.P_t = self.P_t[idx]
+        l = int(len(self.P_t)*pressure)
+        if l%2 != 0:
+            l+=1            
+        self.P_t = (self.P_t)[:l]
+        self.P_t = np.concatenate((self.P_t, P3[:l]))
+        self.fitness_t = [fitness(c) for c in self.P_t]
+        if self.y_star - sorted(self.fitness_t)[0] > tol:
+           self.curr_patience = 1
+        else:
+            self.curr_patience += 1
+        self.y_star = sorted(self.fitness_t)[0]
+        
+            
     def run_GA(self, n_gen, patience, tol):
         while (self.t<n_gen and self.curr_patience < patience):
+            print(self.y_star)
             P1 = GA.MP(self)
-            print("p1: ", P1)
             P2 = GA.recombine(self, P1)
-            print("p2: ", P2)
-            # P3 = mutate(P2)
-            # select(P3)
+            P3 = GA.mutate(self, P2, 0.5)
+            GA.select(self, P3, 0.5)
             self.t+=1
     
 
 g = GA(P_size)
-#print(g.t, g.curr_patience, g.y_star, g.P_t)
+print(g.y_star)
 g.run_GA(generations, patience, tol)
-    # t = 0
-    # curr_patiance = 1
-    # y_star = 50
-    # P_t = np.zeros((P_size, 4))
-    # for i in range(P_size):
-    #     P_t[i] = d_0[i][0], d_0[i][1], n_0[i][0], n_0[i][1]
-    # y_0 = sorted([fitness(c) for c in P_0])
-    # if y_star - y_0 > tol:
-    #     curr_patiance = 1
-    # else:
-    #     patience += 1
-    # y_star = y_0[0]
-    # while (t<generations and curr_patiance < patiance):
-    #     P1 = MP(P_t)
-    #     P2 = recombine(P1)
-    #     P3 = mutate(P2)
-    #     P_t = select(P3, P_t)
-    #     t+=1
-    
-
-
+print(g.y_star)
 
 
 
@@ -221,45 +226,6 @@ g.run_GA(generations, patience, tol)
 # heatmap(Rb_map, "Bare Si: unpolarized R(λ,θ)", vmax=100)
 # 
 # plt.show()
-
-
-
-
-
-
-# def differential_evolution(bounds, pop=POP, gens=GENS, F=F, CR=CR, seed=SEED):
-#     rng = np.random.default_rng(seed)
-#     lo = np.array([b[0] for b in bounds], float)
-#     hi = np.array([b[1] for b in bounds], float)
-#     dim = len(bounds)
-# 
-#     X = rng.uniform(lo, hi, size=(pop, dim))
-#     fX = np.array([objective(x) for x in X], float)
-# 
-#     best_i = int(np.argmin(fX))
-#     best, fbest = X[best_i].copy(), float(fX[best_i])
-# 
-#     for g in range(gens):
-#         for i in range(pop):
-#             idx = [j for j in range(pop) if j != i]
-#             a, b, c = X[rng.choice(idx, 3, replace=False)]
-#             v = np.clip(a + F * (b - c), lo, hi)
-# 
-#             jrand = rng.integers(dim)
-#             mask = (rng.random(dim) < CR)
-#             mask[jrand] = True
-#             u = np.where(mask, v, X[i])
-# 
-#             fu = float(objective(u))
-#             if fu < fX[i]:
-#                 X[i], fX[i] = u, fu
-#                 if fu < fbest:
-#                     best, fbest = u.copy(), fu
-# 
-#         print_log("info",
-#                   f"gen {g+1}/{gens}: d1={best[0]:.2f} nm, d2={best[1]:.2f} nm, "
-#                   f"n1={best[2]:.3f}, n2={best[3]:.3f}, meanR={fbest:.6f}%")
-#     return best, fbest
 
 ]]></script>
 
