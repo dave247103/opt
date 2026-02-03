@@ -29,7 +29,7 @@
 <solvers>
   <optical name="OPTICAL" solver="Fourier2D" lib="modal">
     <geometry ref="simple"/>
-    <expansion size="0"/>
+    <expansion size="8"/>
   </optical>
 </solvers>
 
@@ -43,16 +43,20 @@ L1 = GEO.layer_SiO2
 L2 = GEO.layer_Si3N4
 eps = 5e-4
 side = "top"
-lams   = np.arange(400.0, 700.1, 10.0)  # nm
-angles = np.arange(0.0, 90.1, 9.0)      # deg
+lams   = np.arange(400.0, 700.1, 2.0)  # nm
+angles = np.arange(0.0, 90.1, 3.0)      # deg
+
+lams_plot   = np.arange(400.0, 700.1, 1.0)  # nm
+angles_plot = np.arange(0.0, 90.1, 1.0)      # deg
+
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
 # TOTAL_MAX = 500.0           # nm
 n_bounds = (1.10, 3.40)     # (-)
-P_size= 16
-generations = 8
-patience = 4
+P_size= 64
+generations = 16
+patience = 8
 tol = 0.1
 seed = 8
 rng = np.random.default_rng(seed)
@@ -115,7 +119,9 @@ class GA:
         self.P_t = np.zeros((P_size, 4))
         for i in range(P_size):
             self.P_t[i] = d_0[i][0], d_0[i][1], n_0[i][0], n_0[i][1]
+        self.P_t = np.asarray(self.P_t)
         self.fitness_t = [fitness(c) for c in self.P_t]
+        self.fitness_t = np.asarray(self.fitness_t)
         self.y_star = sorted(self.fitness_t)[0]
     
     def MP(self, alg="roulette"):
@@ -159,13 +165,17 @@ class GA:
             pass           
     
     def select(self, P3, pressure=0.5):
+        self.P_t = np.asarray(self.P_t)
+        self.fitness_t = np.asarray(self.fitness_t)
         idx = np.argsort(self.fitness_t)
         self.P_t = self.P_t[idx]
+        self.fitness_t = self.fitness_t[idx]
         l = int(len(self.P_t)*pressure)
         if l%2 != 0:
             l+=1            
         self.P_t = (self.P_t)[:l]
         self.P_t = np.concatenate((self.P_t, P3[:l]))
+        rng.shuffle(self.P_t)
         self.fitness_t = [fitness(c) for c in self.P_t]
         if self.y_star - sorted(self.fitness_t)[0] > tol:
            self.curr_patience = 1
@@ -182,7 +192,8 @@ class GA:
             P3 = GA.mutate(self, P2, 0.5)
             GA.select(self, P3, 0.5)
             self.t+=1
-    
+        idx = np.argsort(self.fitness_t)
+        self.P_t = self.P_t[idx]
 
 g = GA(P_size)
 print(g.y_star)
@@ -192,38 +203,40 @@ print(g.y_star)
 
 
 
-# def spectrum(lams, theta, d1, d2, n1, n2):
-#     set_layers(d1, d2, n1, n2)
-#     return np.array([refl(lam, theta) for lam in lams], float)
-# 
-# def map_R(lams, thetas, d1, d2, n1, n2):
-#     set_layers(d1, d2, n1, n2)
-#     Z = np.empty((thetas.size, lams.size), float)
-#     for i, th in enumerate(thetas):
-#         for j, lam in enumerate(lams):
-#             Z[i, j] = refl(lam, th)
-#     return Z
-# 
-# def heatmap(Z, title, vmax):
-#     plt.figure(figsize=(8, 6))
-#     plt.pcolormesh(angles, lams, Z.T, shading="auto", vmin=0, vmax=vmax)
-#     plt.xlabel("angle [deg]")
-#     plt.ylabel("wavelength [nm]")
-#     plt.title(title)
-#     plt.colorbar(label="reflectance [%]")
-#     plt.tight_layout()
-# 
-# # baseline
-# J_bare = mean_R(eps, eps, 1.0, 1.0)
-# print_log("result", f"bare meanR (opt grid) = {J_bare:.6f}%")
-# 
-# J_bare_chk = mean_R(eps, eps, 1.0, 1.0, lams=lams, thetas=angles)
-# print_log("result", f"meanR bare={J_bare_chk:.6f}% (check grid)")
-# 
-# 
-# # heatmaps
+def spectrum(lams, theta, d1, d2, n1, n2):
+    set_layers(d1, d2, n1, n2)
+    return np.array([refl(lam, theta) for lam in lams], float)
+
+def map_R(lams, thetas, d1, d2, n1, n2):
+    set_layers(d1, d2, n1, n2)
+    Z = np.empty((thetas.size, lams.size), float)
+    for i, th in enumerate(thetas):
+        for j, lam in enumerate(lams):
+            Z[i, j] = refl(lam, th)
+    return Z
+
+def heatmap(Z, title, vmax):
+    plt.figure(figsize=(8, 6))
+    plt.pcolormesh(angles, lams, Z.T, shading="auto", vmin=0, vmax=vmax)
+    plt.xlabel("angle [deg]")
+    plt.ylabel("wavelength [nm]")
+    plt.title(title)
+    plt.colorbar(label="reflectance [%]")
+    plt.tight_layout()
+
+# baseline
+J_bare = mean_R(eps, eps, 1.0, 1.0)
+print_log("result", f"bare meanR (opt grid) = {J_bare:.6f}%")
+d1_star, d2_star, n1_star, n2_star = g.P_t[0]
+J_opt = mean_R(d1_star, d2_star, n1_star, n2_star)
+print_log("result", f"bare meanR (opt grid) = {J_opt:.6f}%")
+
+
+# heatmaps
 # Rb_map = map_R(lams, angles, eps, eps, 1.0, 1.0)
 # heatmap(Rb_map, "Bare Si: unpolarized R(λ,θ)", vmax=100)
+# R_opt_map = map_R(lams_plot, angles_plot, d1_star, d2_star, n1_star, n2_star)
+# heatmap(R_opt_map, "Optimized unpolarized R(λ,θ)", vmax=50)
 # 
 # plt.show()
 
