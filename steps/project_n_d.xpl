@@ -44,20 +44,20 @@ L1 = GEO.layer_SiO2
 L2 = GEO.layer_Si3N4
 eps = 5e-4
 side = "top"
-lams   = np.arange(400.0, 700.1, 5.0)  # nm
-angles = np.arange(0.0, 90.1, 9.0)      # deg
+lams   = np.arange(400.0, 700.1, 10.0)  # nm
+angles = np.arange(0.0, 90.1, 15.0)      # deg
 
-lams_plot   = np.arange(400.0, 700.1, 1.0)  # nm
-angles_plot = np.arange(0.0, 90.1, 1.0)      # deg
+lams_plot   = np.arange(400.0, 700.1, 2.0)  # nm
+angles_plot = np.arange(0.0, 90.1, 2.0)      # deg
 
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
 # TOTAL_MAX = 500.0           # nm
 n_bounds = (1.10, 3.40)     # (-)
-P_size= 256
-generations = 64
-patience = 16
+P_size= 64
+generations = 16
+patience = 8
 tol = 0.1
 seed = 8
 rng = np.random.default_rng(seed)
@@ -83,13 +83,35 @@ def refl(lam, angle):
     r_TM = OPTICAL.compute_reflectivity(lam, side, "TM")
     return 0.5 * (r_TE + r_TM)
 
-def mean_R(d1, d2, n1, n2, lams=lams, thetas=angles):
+# standart mean_R
+def s_mean_R(d1, d2, n1, n2, lams=lams, thetas=angles, w_lam=None, w_th=None):
     set_layers(d1, d2, n1, n2)
     sum_R = 0.0
     for th in thetas:
         for lam in lams:
             sum_R += refl(lam, th)
     return sum_R / (len(lams) * len(thetas))
+
+# weigthed mean_R
+def mean_R(d1, d2, n1, n2, lams=lams, thetas=angles, w_lam=None, w_th=None):
+    set_layers(d1, d2, n1, n2)
+
+    w_lam = np.ones_like(lams, float) if w_lam is None else np.asarray(w_lam, float)
+    w_th  = np.ones_like(thetas, float) if w_th  is None else np.asarray(w_th,  float)
+
+    w_lam = w_lam / w_lam.sum()
+    w_th  = w_th  / w_th.sum()
+
+    acc = 0.0
+    for i, th in enumerate(thetas):
+        for j, lam in enumerate(lams):
+            acc += w_th[i] * w_lam[j] * refl(lam, th)
+    return acc
+
+
+w_lam = np.ones_like(lams, float)
+w_th  = np.cos(np.deg2rad(angles)).clip(min=0.0)
+
 
 def fitness(x):
     d1, d2, n1, n2 = map(float, x)
@@ -104,26 +126,28 @@ def fitness(x):
     # if n1 > n2:
     #     return np.inf
 
-    return mean_R(d1, d2, n1, n2)
+    return mean_R(d1, d2, n1, n2, w_lam=w_lam, w_th=w_th)
 
+lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
+hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
+
+def clamp(P):
+    return np.clip(P, lo, hi)
 
 
 # GA
 
 class GA:
-    def __init__(self, P_size):
+    def __init__(self, P_size, tol=0.1):
         d_0 = rng.uniform(d_bounds[0], d_bounds[1], [P_size, 2])
         n_0 = rng.uniform(n_bounds[0], n_bounds[1], [P_size, 2])
         self.t = 0
         self.curr_patience = 1
         self.y_star = 50
-        self.P_t = np.zeros((P_size, 4))
-        for i in range(P_size):
-            self.P_t[i] = d_0[i][0], d_0[i][1], n_0[i][0], n_0[i][1]
-        self.P_t = np.asarray(self.P_t)
-        self.fitness_t = [fitness(c) for c in self.P_t]
-        self.fitness_t = np.asarray(self.fitness_t)
-        self.y_star = sorted(self.fitness_t)[0]
+        self.tol = float(tol)
+        self.P_t = np.column_stack([d_0, n_0]).astype(float)
+        self.fitness_t = np.array([fitness(c) for c in self.P_t], float)
+        self.y_star = float(self.fitness_t.min())
     
     def MP(self, alg="roulette"):
         # roulette wheel selection
@@ -138,7 +162,7 @@ class GA:
         # TODO: tournament selection
             pass
     
-    def recombine(self, mating_pool, p=0.5, alg="convex", alpha=0.5):
+    def recombine(self, mating_pool, p_c=0.8, alg="average", alpha=0.5):
         # crossover probability p is used in average and uniform crossover
         if alg == "convex":
             P2 = np.zeros_like(mating_pool)   
@@ -148,26 +172,47 @@ class GA:
                 u = mating_pool[i]   
             return P2             
         elif alg == "average":
-        # TODO: Average Crossover
-            pass
+            P = np.asarray(mating_pool, float).copy()
+            rng.shuffle(P)
+            C = P.copy()
+        
+            for i in range(0, len(P) - 1, 2):
+                if rng.random() < p_c:
+                    a = rng.random(4)  # per-gene mix
+                    p1, p2 = P[i], P[i+1]
+                    C[i]   = a*p1 + (1-a)*p2
+                    C[i+1] = a*p2 + (1-a)*p1
+            return clamp(C)
         elif alg == "discrete":
         # TODO: Uniform Crossover
             pass          
         
-    def mutate(self, P2, p=0.5, alg="uniform"):
+    def mutate(self, P2, p_m=0.1, sigma_d=5.0, sigma_n=0.05, p_reset=0.05, alg="flip"):
         if alg == "uniform":
             P2 = np.asarray(P2, float)
-            idx = np.where(rng.random(len(P2)) < p)[0]
+            idx = np.where(rng.random(len(P2)) < p_m)[0]
             if idx.size:
                 d_m = rng.uniform(*d_bounds, size=(idx.size, 2))
                 n_m = rng.uniform(*n_bounds, size=(idx.size, 2))
                 P2[idx] = np.column_stack([d_m, n_m])
             return P2
         elif alg == "flip":
-        #TODO: flip-flop mutation
-            pass           
+            P = np.asarray(P2, float).copy()
+            m = rng.random(P.shape) < p_m
+            noise = np.zeros_like(P)
+            noise[:, :2] = rng.normal(0.0, sigma_d, size=P[:, :2].shape)  # nm
+            noise[:, 2:] = rng.normal(0.0, sigma_n, size=P[:, 2:].shape)  # refr. idx
+            P = np.where(m, P + noise, P)
+        
+            idx = np.where(rng.random(len(P)) < p_reset)[0]
+            if idx.size:
+                P[idx, :2] = rng.uniform(*d_bounds, size=(idx.size, 2))
+                P[idx, 2:] = rng.uniform(*n_bounds, size=(idx.size, 2))
+            return clamp(P)      
     
-    def select(self, P3):
+    
+    # max pressure
+    def m_select(self, P3, elite_frac=0.10, pressure=0.80):
         # Do I even select P3? even then do I take a portion of P3 to survive regardless of f or not??
         P = np.vstack([self.P_t, np.asarray(P3, float)])
         f = np.asarray([fitness(c) for c in P], float)
@@ -177,23 +222,70 @@ class GA:
         self.fitness_t = f[idx]
     
         best = float(self.fitness_t[0])
-        self.curr_patience = 1 if (self.y_star - best) > tol else (self.curr_patience + 1)
+        self.curr_patience = 1 if (self.y_star - best) >self.tol else (self.curr_patience + 1)
+        self.y_star = best
+
+    #tuned pressure
+    def select(self, P3, elite_frac=0.10, pressure=0.80):
+        mu = len(self.P_t)
+    
+        P3 = clamp(P3)
+        f3 = np.array([fitness(c) for c in P3], float)
+    
+        P = np.vstack([self.P_t, P3])
+        f = np.concatenate([self.fitness_t, f3])
+    
+        order = np.argsort(f)  # ascending (minimization)
+    
+        k_elite = max(1, int(round(elite_frac * mu)))
+        k_det   = int(round(pressure * (mu - k_elite)))
+    
+        elite = order[:k_elite]
+        det   = order[k_elite:k_elite + k_det]
+        rest  = order[k_elite + k_det:]
+    
+        k_fill = mu - (k_elite + k_det)
+        if k_fill > 0 and rest.size:
+            # low-pressure stochastic fill (rank-based)
+            ranks = np.arange(1, rest.size + 1, dtype=float)
+            w = 1.0 / ranks
+            w /= w.sum()
+            fill = rng.choice(rest, size=k_fill, replace=False if rest.size >= k_fill else True, p=w)
+            new_idx = np.concatenate([elite, det, fill])
+        else:
+            new_idx = np.concatenate([elite, det])
+    
+        Q = P[new_idx]
+        Q = np.unique(np.round(Q, 6), axis=0)   # de-dup with tolerance
+        
+        if len(Q) < mu:
+            k = mu - len(Q)
+            d_new = rng.uniform(*d_bounds, size=(k, 2))
+            n_new = rng.uniform(*n_bounds, size=(k, 2))
+            Q = np.vstack([Q, np.column_stack([d_new, n_new])])
+        
+        Q = Q[:mu]
+        self.P_t = Q
+        self.fitness_t = np.array([fitness(c) for c in self.P_t], float)
+        
+        best = float(self.fitness_t.min())
+        self.curr_patience = 0 if (self.y_star - best) > self.tol else (self.curr_patience + 1)
         self.y_star = best
 
         
             
-    def run_GA(self, n_gen, patience, tol):
+    def run_GA(self, n_gen, patience, p_c=0.8, p_m=0.10, elite_frac=0.10, pressure=0.80):
         while self.t < n_gen and self.curr_patience < patience:
-            print(self.y_star)
             P1 = self.MP()
-            P2 = self.recombine(P1)
-            P3 = self.mutate(P2, p=0.01)
-            self.select(P3)
+            P2 = self.recombine(P1, p_c=p_c)
+            P3 = self.mutate(P2, p_m=p_m)
+            self.select(P3, elite_frac=elite_frac, pressure=pressure)
             self.t += 1
+            print(self.y_star)
 
 
-g = GA(P_size)
-g.run_GA(generations, patience, tol)
+g = GA(P_size, tol=tol)
+g.run_GA(generations, patience, elite_frac=0.05, pressure=0.60, p_m=0.15)
 print("the sol: ",g.y_star)
 print(g.P_t)
 print(g.fitness_t)
@@ -226,6 +318,9 @@ def heatmap(lams, thetas, Z, title, vmax):
     plt.colorbar(label="reflectance [%]")
     plt.tight_layout()
 
+w_lam_plot = np.ones_like(lams_plot, float)
+w_th_plot  = np.cos(np.deg2rad(angles_plot)).clip(min=0.0)
+
 # baseline
 J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams_plot, thetas=angles_plot)
 print_log("result", f"bare meanR (plot grid) = {J_bare:.6f}%")
@@ -234,13 +329,21 @@ d1_star, d2_star, n1_star, n2_star = g.P_t[0]
 J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams_plot, thetas=angles_plot)
 print_log("result", f"opt  meanR (plot grid) = {J_opt:.6f}%")
 
+J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams_plot, thetas=angles_plot, w_lam=w_lam_plot, w_th=w_th_plot)
+print_log("result", f"bare meanR (weighted, plot grid) = {J_bare:.6f}%")
+
+d1_star, d2_star, n1_star, n2_star = g.P_t[0]
+J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams_plot, thetas=angles_plot, w_lam=w_lam_plot, w_th=w_th_plot)
+print_log("result", f"opt  meanR (weighted, plot grid) = {J_opt:.6f}%")
+
+
 
 # heatmaps
 Rb_map = map_R(lams_plot, angles_plot, eps, eps, 1.0, 1.0)
 heatmap(lams_plot, angles_plot, Rb_map, "Bare Si: unpolarized R(λ,θ)", vmax=100)
 
 R_opt_map = map_R(lams_plot, angles_plot, d1_star, d2_star, n1_star, n2_star)
-heatmap(lams_plot, angles_plot, R_opt_map, "Optimized unpolarized R(λ,θ)", vmax=50)
+heatmap(lams_plot, angles_plot, R_opt_map, "Optimized unpolarized R(λ,θ)", vmax=100)
 
 plt.show()
 
