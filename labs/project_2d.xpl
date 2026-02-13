@@ -1,34 +1,34 @@
 <plask loglevel="result">
 
 <defines>
+  <define name="nref" value="4.0"/>
   <define name="lam_min" value="550"/>
-  <define name="n_ref" value="4.0"/>
-  <define name="n_layer" value="n_ref**0.5"/>
+  <define name="n_layer" value="nref**0.5"/>
 </defines>
 
 <materials>
   <material name="mySi" base="Si">
-    <nr>n_ref</nr>
     <absp>0</absp>
+    <nr>nref</nr>
   </material>
-  <material name="mySiO2" base="SiO2">
+  <material name="mySi02" base="SiO2">
     <Nr>n_layer</Nr>
   </material>
   <module name="si_nk"/>
 </materials>
 
 <geometry>
-  <cartesian2d name="simple" axes="x,y " left="periodic" right="periodic" bottom="Si_Shinke">
+  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Shinke">
     <stack>
-      <rectangle name="layer_SiO2" material="SiO2" dx="1" dy="1"/>
-      <rectangle name="layer_Si3N4" material="Si3N4" dx="1" dy="1"/>
+      <rectangle name="layer1" material="mySi02" dx="1" dy="1"/>
+      <rectangle name="layer2" material="Si_Shinke" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
 
 <solvers>
   <optical name="OPTICAL" solver="Fourier2D" lib="modal">
-    <geometry ref="simple"/>
+    <geometry ref="main"/>
     <expansion size="0"/>
   </optical>
 </solvers>
@@ -36,24 +36,14 @@
 <script><![CDATA[
 import numpy as np
 import matplotlib.pyplot as plt
-import plask.material as pm
-Si = pm.get("Si_Shinke")
 
-# plask
-L1 = GEO.layer_SiO2
-L2 = GEO.layer_Si3N4
+# opt
+lams = np.arange(400.0, 700.1, 2.0)
 eps = 5e-4
 side = "top"
-lams   = np.arange(400.0, 700.1, 20.0)  # nm
-angles = np.arange(0.0, 45.0, 45.1)      # deg
-
-lams_plot   = np.arange(400.0, 700.1, 20.0)  # nm
-angles_plot = np.arange(0.0, 45.0, 45.1)      # deg
-
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
-# TOTAL_MAX = 500.0           # nm
 n_bounds = (1.10, 3.40)     # (-)
 P_size= 128
 generations = 2
@@ -61,57 +51,43 @@ patience = 8
 tol = 0.1
 seed = 8
 rng = np.random.default_rng(seed)
+lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
+hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
 
+def clamp(P):
+    return np.clip(P, lo, hi)
 
+class LayerMaterial(material.Material):
+    
+    def __init__(self, nr):
+        super().__init__()
+        self._nr = nr
 
-
-
+    def abs(self, lam, T=300.):
+        return 0
+    
+    def nr(self, lam, T=300., n=0.):
+        return self._nr
+        
 def set_layers(d1, d2, n1, n2):
-    L1.height = max(d1, eps) * 1e-3
-    L2.height = max(d2, eps) * 1e-3
-    L1.nr = n1
-    L2.nr = n2
+    GEO.layer1.height = d1
+    GEO.layer2.height = d2
+    GEO.layer1.material = LayerMaterial(n1)
+    GEO.layer2.material = LayerMaterial(n2)
 
 def set_bare():
     set_layers(eps, eps, 1.0, 1.0)
 
-def refl(lam, angle):
-    OPTICAL.ktran = 2e3 * np.pi / lam * np.sin(np.pi / 180. * angle)
-    if side == 'bottom':
-        OPTICAL.ktran *= float(np.real(Si.nr(lam)))
+def refl(lam):
     r_TE = OPTICAL.compute_reflectivity(lam, side, "TE")
-    r_TM = OPTICAL.compute_reflectivity(lam, side, "TM")
-    return 0.5 * (r_TE + r_TM)
-
-# standart mean_R
-def s_mean_R(d1, d2, n1, n2, lams=lams, thetas=angles, w_lam=None, w_th=None):
+    return r_TE
+    
+def mean_R(d1, d2, n1, n2, lams=lams):
     set_layers(d1, d2, n1, n2)
     sum_R = 0.0
-    for th in thetas:
-        for lam in lams:
-            sum_R += refl(lam, th)
-    return sum_R / (len(lams) * len(thetas))
-
-# weigthed mean_R
-def mean_R(d1, d2, n1, n2, lams=lams, thetas=angles, w_lam=None, w_th=None):
-    set_layers(d1, d2, n1, n2)
-
-    w_lam = np.ones_like(lams, float) if w_lam is None else np.asarray(w_lam, float)
-    w_th  = np.ones_like(thetas, float) if w_th  is None else np.asarray(w_th,  float)
-
-    w_lam = w_lam / w_lam.sum()
-    w_th  = w_th  / w_th.sum()
-
-    acc = 0.0
-    for i, th in enumerate(thetas):
-        for j, lam in enumerate(lams):
-            acc += w_th[i] * w_lam[j] * refl(lam, th)
-    return acc
-
-
-w_lam = np.ones_like(lams, float)
-w_th  = np.cos(np.deg2rad(angles)).clip(min=0.0)
-
+    for lam in lams:
+        sum_R += refl(lam)
+    return sum_R / len(lams)
 
 def fitness(x):
     d1, d2, n1, n2 = map(float, x)
@@ -126,16 +102,9 @@ def fitness(x):
     # if n1 > n2:
     #     return np.inf
 
-    return mean_R(d1, d2, n1, n2, w_lam=w_lam, w_th=w_th)
-
-lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
-hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
-
-def clamp(P):
-    return np.clip(P, lo, hi)
+    return mean_R(d1, d2, n1, n2)
 
 
-# GA
 
 class GA:
     def __init__(self, P_size, tol=0.1):
@@ -149,6 +118,7 @@ class GA:
         self.fitness_t = np.array([fitness(c) for c in self.P_t], float)
         self.y_star = float(self.fitness_t.min())
     
+    
     def MP(self, alg="roulette"):
         # roulette wheel selection
         if alg == "roulette":
@@ -161,6 +131,7 @@ class GA:
         elif alg == "tournament":
         # TODO: tournament selection
             pass
+    
     
     def recombine(self, mating_pool, p_c=0.8, alg="average", alpha=0.5):
         # crossover probability p is used in average and uniform crossover
@@ -186,6 +157,7 @@ class GA:
         elif alg == "discrete":
         # TODO: Uniform Crossover
             pass          
+        
         
     def mutate(self, P2, p_m=0.1, sigma_d=5.0, sigma_n=0.05, p_reset=0.05, alg="flip"):
         if alg == "uniform":
@@ -282,8 +254,7 @@ class GA:
             self.select(P3, elite_frac=elite_frac, pressure=pressure)
             self.t += 1
             print(self.y_star)
-
-
+            
 g = GA(P_size, tol=tol)
 g.run_GA(generations, patience, elite_frac=0.05, pressure=0.60, p_m=0.15)
 print("the sol: ",g.y_star)
@@ -296,58 +267,29 @@ print("the params: ", P_t)
 print("lowest R: ", fitness_t)
 
 
-
-def spectrum(lams, theta, d1, d2, n1, n2):
-    set_layers(d1, d2, n1, n2)
-    return np.array([refl(lam, theta) for lam in lams], float)
-
-def map_R(lams, thetas, d1, d2, n1, n2):
-    set_layers(d1, d2, n1, n2)
-    Z = np.empty((thetas.size, lams.size), float)
-    for i, th in enumerate(thetas):
-        for j, lam in enumerate(lams):
-            Z[i, j] = refl(lam, th)
-    return Z
-
-def heatmap(lams, thetas, Z, title, vmax):
-    plt.figure(figsize=(8, 6))
-    plt.pcolormesh(thetas, lams, Z.T, shading="auto", vmin=0, vmax=vmax)
-    plt.xlabel("angle [deg]")
-    plt.ylabel("wavelength [nm]")
-    plt.title(title)
-    plt.colorbar(label="reflectance [%]")
-    plt.tight_layout()
-
-w_lam_plot = np.ones_like(lams_plot, float)
-w_th_plot  = np.cos(np.deg2rad(angles_plot)).clip(min=0.0)
-
 # baseline
-J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams_plot, thetas=angles_plot)
+J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams)
 print_log("result", f"bare meanR (plot grid) = {J_bare:.6f}%")
 
 d1_star, d2_star, n1_star, n2_star = g.P_t[0]
-J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams_plot, thetas=angles_plot)
+J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams)
 print_log("result", f"opt  meanR (plot grid) = {J_opt:.6f}%")
 
-J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams_plot, thetas=angles_plot, w_lam=w_lam_plot, w_th=w_th_plot)
-print_log("result", f"bare meanR (weighted, plot grid) = {J_bare:.6f}%")
 
-d1_star, d2_star, n1_star, n2_star = g.P_t[0]
-J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams_plot, thetas=angles_plot, w_lam=w_lam_plot, w_th=w_th_plot)
-print_log("result", f"opt  meanR (weighted, plot grid) = {J_opt:.6f}%")
+def plot2d(d1, d2, n1, n2, lams, title):
+    set_layers(d1, d2, n1, n2)
+    plt.plot(lams, refls, label= f"$nr$ = {nr}")
+    plt.figure(figsize=(8, 6))
+    plt.legend()
+    plt.xlabel("wavelength [nm]")
+    plt.ylabel("Reflectivity (%)")
+    plt.title(title)
+    plt.tight_layout()
 
-
-
-# heatmaps
-Rb_map = map_R(lams_plot, angles_plot, eps, eps, 1.0, 1.0)
-heatmap(lams_plot, angles_plot, Rb_map, "Bare Si: unpolarized R(λ,θ)", vmax=100)
-
-R_opt_map = map_R(lams_plot, angles_plot, d1_star, d2_star, n1_star, n2_star)
-heatmap(lams_plot, angles_plot, R_opt_map, "Optimized unpolarized R(λ,θ)", vmax=100)
+plot2d(eps, eps, 1.0, 1.0, lams, "Bare Si: TE polarized R(λ,θ)")
+plot2d(d1_star, d2_star, n1_star, n2_star, lams, "Optimized TE polarized R(λ,θ)")
 
 plt.show()
-
-
 ]]></script>
 
 </plask>

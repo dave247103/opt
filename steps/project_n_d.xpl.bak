@@ -44,19 +44,19 @@ L1 = GEO.layer_SiO2
 L2 = GEO.layer_Si3N4
 eps = 5e-4
 side = "top"
-lams   = np.arange(400.0, 700.1, 10.0)  # nm
-angles = np.arange(0.0, 90.1, 15.0)      # deg
+lams   = np.arange(400.0, 700.1, 20.0)  # nm
+angles = np.arange(0.0, 45.0, 45.0)      # deg
 
-lams_plot   = np.arange(400.0, 700.1, 2.0)  # nm
-angles_plot = np.arange(0.0, 90.1, 2.0)      # deg
+lams_plot   = np.arange(400.0, 700.1, 20.0)  # nm
+angles_plot = np.arange(0.0, 45.0, 45.0)      # deg
 
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
 # TOTAL_MAX = 500.0           # nm
 n_bounds = (1.10, 3.40)     # (-)
-P_size= 64
-generations = 16
+P_size= 128
+generations = 2
 patience = 8
 tol = 0.1
 seed = 8

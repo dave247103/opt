@@ -18,7 +18,7 @@
 </materials>
 
 <geometry>
-  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="mySi">
+  <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Shinke">
     <stack>
       <rectangle name="layer1" material="mySi02" dx="1" dy="0.060"/>
       <rectangle material="Si_Shinke" dx="1" dy="1"/>
