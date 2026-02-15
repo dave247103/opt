@@ -36,17 +36,19 @@
 <script><![CDATA[
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+
 
 # opt
-lams = np.arange(400.0, 700.1, 2.0)
+lams = np.arange(400.0, 700.1, 1.0)
 eps = 5e-4
 side = "top"
 
 # GA
 d_bounds = (10.0, 200.0)     # nm
 n_bounds = (1.10, 3.40)     # (-)
-P_size= 128
-generations = 2
+P_size= 10
+generations = 3
 patience = 8
 tol = 0.1
 seed = 8
@@ -54,8 +56,18 @@ rng = np.random.default_rng(seed)
 lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
 hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
 
+
+path = os.path.join("ASTMG173.csv")
+sun_data = np.genfromtxt(path, delimiter=',', skip_header=2)
+SUN_WLS, SUN_INTENS = sun_data[:, 0], sun_data[:, 2]
+
+def get_solar_weight(lams):
+    return np.interp(lams, SUN_WLS, SUN_INTENS)
+weights = get_solar_weight(lams)
+
 def clamp(P):
     return np.clip(P, lo, hi)
+
 
 class LayerMaterial(material.Material):
     
@@ -68,26 +80,31 @@ class LayerMaterial(material.Material):
     
     def nr(self, lam, T=300., n=0.):
         return self._nr
-        
+    
+
 def set_layers(d1, d2, n1, n2):
     GEO.layer1.height = d1
     GEO.layer2.height = d2
+    # GEO.layer1.nr = n1
+    # GEO.layer2.nr = n2
     GEO.layer1.material = LayerMaterial(n1)
     GEO.layer2.material = LayerMaterial(n2)
+
 
 def set_bare():
     set_layers(eps, eps, 1.0, 1.0)
 
-def refl(lam):
-    r_TE = OPTICAL.compute_reflectivity(lam, side, "TE")
+
+def refls(lams):
+    r_TE = OPTICAL.compute_reflectivity(lams, side, "TE")
     return r_TE
+    
     
 def mean_R(d1, d2, n1, n2, lams=lams):
     set_layers(d1, d2, n1, n2)
-    sum_R = 0.0
-    for lam in lams:
-        sum_R += refl(lam)
-    return sum_R / len(lams)
+    R = np.asarray(refls(lams), float)
+    return float(np.sum(R * weights) / np.sum(weights))
+
 
 def fitness(x):
     d1, d2, n1, n2 = map(float, x)
@@ -254,7 +271,8 @@ class GA:
             self.select(P3, elite_frac=elite_frac, pressure=pressure)
             self.t += 1
             print(self.y_star)
-            
+        
+
 g = GA(P_size, tol=tol)
 g.run_GA(generations, patience, elite_frac=0.05, pressure=0.60, p_m=0.15)
 print("the sol: ",g.y_star)
@@ -273,13 +291,15 @@ print_log("result", f"bare meanR (plot grid) = {J_bare:.6f}%")
 
 d1_star, d2_star, n1_star, n2_star = g.P_t[0]
 J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams)
-print_log("result", f"opt  meanR (plot grid) = {J_opt:.6f}%")
-
+print_log("result", f"opt  meanR (plot grid) = {
+J_opt:.6f}%")
+    
 
 def plot2d(d1, d2, n1, n2, lams, title):
+    
     set_layers(d1, d2, n1, n2)
-    plt.plot(lams, refls, label= f"$nr$ = {nr}")
     plt.figure(figsize=(8, 6))
+    plt.plot(lams, refls(lams), label=f"n1={n1:.3f}, n2={n2:.3f}")
     plt.legend()
     plt.xlabel("wavelength [nm]")
     plt.ylabel("Reflectivity (%)")
