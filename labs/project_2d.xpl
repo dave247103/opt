@@ -22,6 +22,7 @@
     <stack>
       <rectangle name="layer1" material="mySi02" dx="1" dy="1"/>
       <rectangle name="layer2" material="mySi02" dx="1" dy="1"/>
+      <rectangle name="layer3" material="mySi02" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
@@ -38,7 +39,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-N_LAYERS = 2
+N_LAYERS = 3
 
 # opt
 lams = np.arange(400.0, 700.1, 1.0)
@@ -48,8 +49,8 @@ side = "top"
 # GA
 d_bounds = (20.0, 200.0)     # nm
 n_bounds = (1.16, 3.00)
-P_size= 8
-generations = 2
+P_size= 64
+generations = 16
 patience = 8
 tol = 0.1
 seed = 8
@@ -84,12 +85,6 @@ class LayerMaterial(material.Material):
     
     def nr(self, lam, T=300., n=0.):
         return float(self._nr)
-
-# def set_layers(d1, d2, n1, n2):
-#     GEO.layer1.height = d1 / 1000
-#     GEO.layer2.height = d2 / 1000
-#     GEO.layer1.material = LayerMaterial(n1)
-#     GEO.layer2.material = LayerMaterial(n2)
     
 def set_stack(d_list, n_list):
     for i, (d, n) in enumerate(zip(d_list, n_list)):
@@ -240,24 +235,22 @@ def save_plot(d_opt, n_opt, lams, filename_prefix="2_layers"):
     R_curve = refls(lams)
     R_mean = float(np.sum(R_curve * weights) / np.sum(weights))
 
-    d_str = "[" + ", ".join([f"{x:.1f}" for x in d_opt]) + "]"
-    n_str = "[" + ", ".join([f"{x:.2f}" for x in n_opt]) + "]"
+    ds = "[" + ", ".join([f"{x:.1f}" for x in d_opt]) + "]"
+    ns = "[" + ", ".join([f"{x:.2f}" for x in n_opt]) + "]"
     
     n_layers = len(d_opt)
     
-    title_main = f"{n_layers} Layers Optimization $R_{{w}}$ = {R_mean:.3f}%"
-    param_str = f"d={d_str} nm\nn={n_str}"
+    t = f"{n_layers} Layers Optimization $R_{{w}}$ = {R_mean:.3f}%"
+    params = f"d={ds} nm\nn={ns}"
     
     plt.figure(figsize=(10, 6))
     plt.plot(lams, R_curve, linewidth=2, label="Optimized R")
     plt.axhline(0, color='k', linewidth=0.5)
-    
     plt.xlabel(r"$\lambda$ [nm]", fontsize=12)
     plt.ylabel("Reflectivity [%]", fontsize=12)
     plt.grid(True, alpha=0.3)
-
-    plt.title(title_main, fontsize=13)
-    plt.plot([], [], ' ', label=param_str)
+    plt.title(t, fontsize=13)
+    plt.plot([], [], ' ', label=params)
     plt.legend(loc='upper right', framealpha=0.95)
 
     filename = f"{output_dir}/{filename_prefix}_optimized.png"
