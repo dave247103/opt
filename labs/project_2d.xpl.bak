@@ -38,6 +38,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
+N_LAYERS = 2
 
 # opt
 lams = np.arange(400.0, 700.1, 1.0)
@@ -47,14 +48,20 @@ side = "top"
 # GA
 d_bounds = (20.0, 200.0)     # nm
 n_bounds = (1.16, 3.00)
-P_size= 10
-generations = 3
+P_size= 8
+generations = 2
 patience = 8
 tol = 0.1
 seed = 8
 rng = np.random.default_rng(seed)
-lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
-hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
+
+lo = np.concatenate([np.full(N_LAYERS, d_bounds[0]), np.full(N_LAYERS, n_bounds[0])])
+hi = np.concatenate([np.full(N_LAYERS, d_bounds[1]), np.full(N_LAYERS, n_bounds[1])])
+
+
+# plots
+output_dir = "plots"
+os.makedirs(output_dir, exist_ok=True)
 
 # import ASTM G173 data
 path = os.path.join("ASTMG173.csv")
@@ -68,51 +75,45 @@ weights = get_solar_weight(lams)
 
 
 class LayerMaterial(material.Material):
-    
-    def __init__(self, nr):
+    def __init__(self, n):
         super().__init__()
-        self._nr = nr
+        self._nr = n
 
-    def abs(self, lam, T=300.):
+    def absp(self, lam, T=300.):
         return 0
     
     def nr(self, lam, T=300., n=0.):
-        return self._nr
-    
-def set_layers(d1, d2, n1, n2):
-    GEO.layer1.height = d1
-    GEO.layer2.height = d2
-    # GEO.layer1.nr = n1
-    # GEO.layer2.nr = n2
-    GEO.layer1.material = LayerMaterial(n1)
-    GEO.layer2.material = LayerMaterial(n2)
+        return float(self._nr)
 
-def set_bare():
-    set_layers(eps, eps, 1.0, 1.0)
+# def set_layers(d1, d2, n1, n2):
+#     GEO.layer1.height = d1 / 1000
+#     GEO.layer2.height = d2 / 1000
+#     GEO.layer1.material = LayerMaterial(n1)
+#     GEO.layer2.material = LayerMaterial(n2)
+    
+def set_stack(d_list, n_list):
+    for i, (d, n) in enumerate(zip(d_list, n_list)):
+        layer_name = f"layer{i+1}"
+        layer = getattr(GEO, layer_name)
+        layer.height = d / 1000.0
+        layer.material = LayerMaterial(n)
 
 def refls(lams):
     r_TE = OPTICAL.compute_reflectivity(lams, side, "TE")
     return r_TE 
-    
-def mean_R(d1, d2, n1, n2, lams=lams):
-    set_layers(d1, d2, n1, n2)
+
+def mean_R(d_arr, n_arr, lams=lams):
+    set_stack(d_arr, n_arr)
     R = np.asarray(refls(lams), float)
     return float(np.sum(R * weights) / np.sum(weights))
 
 def fitness(x):
-    d1, d2, n1, n2 = map(float, x)
-
-    if not (d_bounds[0] <= d1 <= d_bounds[1] and d_bounds[0] <= d2 <= d_bounds[1]):
-        return np.inf
-    # if TOTAL_MAX is not None and (d1 + d2) > TOTAL_MAX:
-    #     return np.inf
-
-    if not (n_bounds[0] <= n1 <= n_bounds[1] and n_bounds[0] <= n2 <= n_bounds[1]):
-        return np.inf
-    # if n1 > n2:
-    #     return np.inf
-
-    return mean_R(d1, d2, n1, n2)
+    mid = len(x) // 2
+    d_arr = x[:mid]
+    n_arr = x[mid:]
+    if np.any(d_arr < d_bounds[0]) or np.any(d_arr > d_bounds[1]): return np.inf
+    if np.any(n_arr < n_bounds[0]) or np.any(n_arr > n_bounds[1]): return np.inf
+    return mean_R(d_arr, n_arr)
 
 
 def clamp(P):
@@ -120,8 +121,8 @@ def clamp(P):
 
 class GA:
     def __init__(self, P_size, tol=0.1):
-        d_0 = rng.uniform(d_bounds[0], d_bounds[1], [P_size, 2])
-        n_0 = rng.uniform(n_bounds[0], n_bounds[1], [P_size, 2])
+        d_0 = rng.uniform(d_bounds[0], d_bounds[1], [P_size, N_LAYERS])
+        n_0 = rng.uniform(n_bounds[0], n_bounds[1], [P_size, N_LAYERS])
         self.t = 0
         self.curr_patience = 1
         self.y_star = 50
@@ -138,107 +139,74 @@ class GA:
             w /= w.sum()
             idx = rng.choice(len(f), size=len(f), replace=True, p=w)
             return np.asarray(self.P_t[idx], float)
-        elif alg == "tournament":
-        # TODO: tournament selection
-            pass
     
     def recombine(self, mating_pool, p_c=0.8, alg="average", alpha=0.5):
         # crossover probability p_c is used in average and uniform crossover
         if alg == "convex":
             P2 = np.zeros_like(mating_pool)   
-            u = mating_pool[-1]         
+            u = mating_pool[-1]
+            n_genes = mating_pool.shape[1]  # Get dynamic length
             for i, c in enumerate(mating_pool):
-                P2[i] = [alpha*u[g]+(1-alpha)*mating_pool[i][g] for g in range(4)]
+                P2[i] = [alpha*u[g]+(1-alpha)*mating_pool[i][g] for g in range(n_genes)]
                 u = mating_pool[i]   
-            return P2             
+            return clamp(P2)         
         elif alg == "average":
             P = np.asarray(mating_pool, float).copy()
             rng.shuffle(P)
             C = P.copy()
+            n_genes = P.shape[1]
         
             for i in range(0, len(P) - 1, 2):
                 if rng.random() < p_c:
-                    a = rng.random(4)  # per-gene mix
+                    a = rng.random(n_genes)
                     p1, p2 = P[i], P[i+1]
                     C[i]   = a*p1 + (1-a)*p2
                     C[i+1] = a*p2 + (1-a)*p1
-            return clamp(C)
-        elif alg == "discrete":
-        # TODO: Uniform Crossover
-            pass          
+            return clamp(C)  
         
     def mutate(self, P2, p_m=0.1, sigma_d=5.0, sigma_n=0.05, alg="flip"):
         if alg == "uniform":
             P2 = np.asarray(P2, float)
             idx = np.where(rng.random(len(P2)) < p_m)[0]
             if idx.size:
-                d_m = rng.uniform(*d_bounds, size=(idx.size, 2))
-                n_m = rng.uniform(*n_bounds, size=(idx.size, 2))
+                N = P2.shape[1] // 2 
+                d_m = rng.uniform(*d_bounds, size=(idx.size, N))
+                n_m = rng.uniform(*n_bounds, size=(idx.size, N))
                 P2[idx] = np.column_stack([d_m, n_m])
             return P2
         elif alg == "flip":
             P = np.asarray(P2, float).copy()
             m = rng.random(P.shape) < p_m
             noise = np.zeros_like(P)
-            noise[:, :2] = rng.normal(0.0, sigma_d, size=P[:, :2].shape)  # nm
-            noise[:, 2:] = rng.normal(0.0, sigma_n, size=P[:, 2:].shape)  # refrative idx
+            mid = P.shape[1] // 2 
+            noise[:, :mid] = rng.normal(0.0, sigma_d, size=P[:, :mid].shape)  # nm
+            noise[:, mid:] = rng.normal(0.0, sigma_n, size=P[:, mid:].shape)  # refractive idx
             P = np.where(m, P + noise, P)
             return clamp(P)
-    
-    # max pressure
-    def m_select(self, P3):
-        P = np.vstack([self.P_t, np.asarray(P3, float)])
-        f = np.asarray([fitness(c) for c in P], float)
-    
-        idx = np.argsort(f)[:len(self.P_t)]
-        self.P_t = P[idx]
-        self.fitness_t = f[idx] 
-    
-        best = float(self.fitness_t[0])
-        self.curr_patience = 1 if (self.y_star - best) >self.tol else (self.curr_patience + 1)
-        self.y_star = best
 
-    #tuned pressure
+
+
     def select(self, P3, elite_frac=0.10, pressure=0.80):
         mu = len(self.P_t)
-    
         P3 = clamp(P3)
         f3 = np.array([fitness(c) for c in P3], float)
-    
         P = np.vstack([self.P_t, P3])
         f = np.concatenate([self.fitness_t, f3])
-    
-        order = np.argsort(f)
-    
+        order = np.argsort(f)    
         k_elite = max(1, int(round(elite_frac * mu)))
         k_det   = int(round(pressure * (mu - k_elite)))
+        
+        new_idx = order[:k_elite + k_det]
+
     
-        elite = order[:k_elite]
-        det   = order[k_elite:k_elite + k_det]
-        rest  = order[k_elite + k_det:]
-    
-        k_fill = mu - (k_elite + k_det)
-        if k_fill > 0 and rest.size:
-            # low-pressure stochastic fill (rank-based)
-            ranks = np.arange(1, rest.size + 1, dtype=float)
-            w = 1.0 / ranks
-            w /= w.sum()
-            fill = rng.choice(rest, size=k_fill, replace=False if rest.size >= k_fill else True, p=w)
-            new_idx = np.concatenate([elite, det, fill])
-        else:
-            new_idx = np.concatenate([elite, det])
-    
+        if len(new_idx) < mu:
+            rest = order[k_elite + k_det:]
+            fill = rng.choice(rest, size=mu - len(new_idx), replace=True)
+            new_idx = np.concatenate([new_idx, fill])
+            
         Q = P[new_idx]
-        Q = np.unique(np.round(Q, 6), axis=0)   # de-dup with tolerance
-        
-        if len(Q) < mu:
-            k = mu - len(Q)
-            d_new = rng.uniform(*d_bounds, size=(k, 2))
-            n_new = rng.uniform(*n_bounds, size=(k, 2))
-            Q = np.vstack([Q, np.column_stack([d_new, n_new])])
-        
-        Q = Q[:mu]
-        self.P_t = Q
+
+        self.P_t = Q[:mu]
         self.fitness_t = np.array([fitness(c) for c in self.P_t], float)
         
         best = float(self.fitness_t.min())
@@ -256,42 +224,48 @@ class GA:
         
 
 g = GA(P_size, tol=tol)
-g.run_GA(generations, patience, elite_frac=0.1, p_m=0.1)
-print("the sol: ",g.y_star)
-print(g.P_t)
-print(g.fitness_t)
-idx = np.argsort(g.fitness_t)
-P_t = g.P_t[idx]
-fitness_t = g.fitness_t[idx]
-print("the params: ", P_t)
-print("lowest R: ", fitness_t)
+g.run_GA(generations, patience, elite_frac=0.2, p_m=0.05)
+print("Best Solution R:", g.y_star)
+best_chrome = g.P_t[np.argmin(g.fitness_t)]
+n_layers = len(best_chrome) // 2
+d_star = best_chrome[:n_layers]
+n_star = best_chrome[n_layers:]
+print("Optimal d:", d_star)
+print("Optimal n:", n_star)
 
 
-# baseline
-J_bare = mean_R(eps, eps, 1.0, 1.0, lams=lams)
-print_log("result", f"bare meanR (plot grid) = {J_bare:.6f}%")
 
-d1_star, d2_star, n1_star, n2_star = g.P_t[0]
-J_opt = mean_R(d1_star, d2_star, n1_star, n2_star, lams=lams)
-print_log("result", f"opt  meanR (plot grid) = {
-J_opt:.6f}%")
+def save_plot(d_opt, n_opt, lams, filename_prefix="2_layers"):
+    set_stack(d_opt, n_opt)
+    R_curve = refls(lams)
+    R_mean = float(np.sum(R_curve * weights) / np.sum(weights))
+
+    d_str = "[" + ", ".join([f"{x:.1f}" for x in d_opt]) + "]"
+    n_str = "[" + ", ".join([f"{x:.2f}" for x in n_opt]) + "]"
     
-
-def plot2d(d1, d2, n1, n2, lams, title):
+    n_layers = len(d_opt)
     
-    set_layers(d1, d2, n1, n2)
-    plt.figure(figsize=(8, 6))
-    plt.plot(lams, refls(lams), label=f"n1={n1:.3f}, n2={n2:.3f}")
-    plt.legend()
-    plt.xlabel("wavelength [nm]")
-    plt.ylabel("Reflectivity (%)")
-    plt.title(title)
-    plt.tight_layout()
+    title_main = f"{n_layers} Layers Optimization $R_{{w}}$ = {R_mean:.3f}%"
+    param_str = f"d={d_str} nm\nn={n_str}"
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(lams, R_curve, linewidth=2, label="Optimized R")
+    plt.axhline(0, color='k', linewidth=0.5)
+    
+    plt.xlabel(r"$\lambda$ [nm]", fontsize=12)
+    plt.ylabel("Reflectivity [%]", fontsize=12)
+    plt.grid(True, alpha=0.3)
 
-plot2d(eps, eps, 1.0, 1.0, lams, "Bare Si: TE polarized R(λ,θ)")
-plot2d(d1_star, d2_star, n1_star, n2_star, lams, "Optimized TE polarized R(λ,θ)")
+    plt.title(title_main, fontsize=13)
+    plt.plot([], [], ' ', label=param_str)
+    plt.legend(loc='upper right', framealpha=0.95)
 
-plt.show()
+    filename = f"{output_dir}/{filename_prefix}_optimized.png"
+    plt.savefig(filename, dpi=300)
+    print(f"Plot saved to {filename}")
+    plt.close()
+
+save_plot(d_star, n_star, lams, filename_prefix=f"{n_layers}_layers")
 ]]></script>
 
 </plask>
