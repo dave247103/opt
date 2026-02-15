@@ -21,7 +21,7 @@
   <cartesian2d name="main" axes="x,y" left="periodic" right="periodic" bottom="Si_Shinke">
     <stack>
       <rectangle name="layer1" material="mySi02" dx="1" dy="1"/>
-      <rectangle name="layer2" material="Si_Shinke" dx="1" dy="1"/>
+      <rectangle name="layer2" material="mySi02" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
@@ -45,8 +45,8 @@ eps = 5e-4
 side = "top"
 
 # GA
-d_bounds = (10.0, 200.0)     # nm
-n_bounds = (1.10, 3.40)     # (-)
+d_bounds = (20.0, 200.0)     # nm
+n_bounds = (1.16, 3.00)
 P_size= 10
 generations = 3
 patience = 8
@@ -56,7 +56,7 @@ rng = np.random.default_rng(seed)
 lo = np.array([d_bounds[0], d_bounds[0], n_bounds[0], n_bounds[0]], float)
 hi = np.array([d_bounds[1], d_bounds[1], n_bounds[1], n_bounds[1]], float)
 
-
+# import ASTM G173 data
 path = os.path.join("ASTMG173.csv")
 sun_data = np.genfromtxt(path, delimiter=',', skip_header=2)
 SUN_WLS, SUN_INTENS = sun_data[:, 0], sun_data[:, 2]
@@ -65,8 +65,6 @@ def get_solar_weight(lams):
     return np.interp(lams, SUN_WLS, SUN_INTENS)
 weights = get_solar_weight(lams)
 
-def clamp(P):
-    return np.clip(P, lo, hi)
 
 
 class LayerMaterial(material.Material):
@@ -81,7 +79,6 @@ class LayerMaterial(material.Material):
     def nr(self, lam, T=300., n=0.):
         return self._nr
     
-
 def set_layers(d1, d2, n1, n2):
     GEO.layer1.height = d1
     GEO.layer2.height = d2
@@ -90,21 +87,17 @@ def set_layers(d1, d2, n1, n2):
     GEO.layer1.material = LayerMaterial(n1)
     GEO.layer2.material = LayerMaterial(n2)
 
-
 def set_bare():
     set_layers(eps, eps, 1.0, 1.0)
 
-
 def refls(lams):
     r_TE = OPTICAL.compute_reflectivity(lams, side, "TE")
-    return r_TE
-    
+    return r_TE 
     
 def mean_R(d1, d2, n1, n2, lams=lams):
     set_layers(d1, d2, n1, n2)
     R = np.asarray(refls(lams), float)
     return float(np.sum(R * weights) / np.sum(weights))
-
 
 def fitness(x):
     d1, d2, n1, n2 = map(float, x)
@@ -122,6 +115,8 @@ def fitness(x):
     return mean_R(d1, d2, n1, n2)
 
 
+def clamp(P):
+    return np.clip(P, lo, hi)
 
 class GA:
     def __init__(self, P_size, tol=0.1):
@@ -135,10 +130,8 @@ class GA:
         self.fitness_t = np.array([fitness(c) for c in self.P_t], float)
         self.y_star = float(self.fitness_t.min())
     
-    
     def MP(self, alg="roulette"):
-        # roulette wheel selection
-        if alg == "roulette":
+        if alg == "roulette":   # roulette wheel selection
             f = np.asarray(self.fitness_t, float)
             w = 1.0 / (f + 1e-12)
             w[~np.isfinite(w)] = 0.0
@@ -149,9 +142,8 @@ class GA:
         # TODO: tournament selection
             pass
     
-    
     def recombine(self, mating_pool, p_c=0.8, alg="average", alpha=0.5):
-        # crossover probability p is used in average and uniform crossover
+        # crossover probability p_c is used in average and uniform crossover
         if alg == "convex":
             P2 = np.zeros_like(mating_pool)   
             u = mating_pool[-1]         
@@ -175,8 +167,7 @@ class GA:
         # TODO: Uniform Crossover
             pass          
         
-        
-    def mutate(self, P2, p_m=0.1, sigma_d=5.0, sigma_n=0.05, p_reset=0.05, alg="flip"):
+    def mutate(self, P2, p_m=0.1, sigma_d=5.0, sigma_n=0.05, alg="flip"):
         if alg == "uniform":
             P2 = np.asarray(P2, float)
             idx = np.where(rng.random(len(P2)) < p_m)[0]
@@ -190,25 +181,18 @@ class GA:
             m = rng.random(P.shape) < p_m
             noise = np.zeros_like(P)
             noise[:, :2] = rng.normal(0.0, sigma_d, size=P[:, :2].shape)  # nm
-            noise[:, 2:] = rng.normal(0.0, sigma_n, size=P[:, 2:].shape)  # refr. idx
+            noise[:, 2:] = rng.normal(0.0, sigma_n, size=P[:, 2:].shape)  # refrative idx
             P = np.where(m, P + noise, P)
-        
-            idx = np.where(rng.random(len(P)) < p_reset)[0]
-            if idx.size:
-                P[idx, :2] = rng.uniform(*d_bounds, size=(idx.size, 2))
-                P[idx, 2:] = rng.uniform(*n_bounds, size=(idx.size, 2))
-            return clamp(P)      
-    
+            return clamp(P)
     
     # max pressure
-    def m_select(self, P3, elite_frac=0.10, pressure=0.80):
-        # Do I even select P3? even then do I take a portion of P3 to survive regardless of f or not??
+    def m_select(self, P3):
         P = np.vstack([self.P_t, np.asarray(P3, float)])
         f = np.asarray([fitness(c) for c in P], float)
     
         idx = np.argsort(f)[:len(self.P_t)]
         self.P_t = P[idx]
-        self.fitness_t = f[idx]
+        self.fitness_t = f[idx] 
     
         best = float(self.fitness_t[0])
         self.curr_patience = 1 if (self.y_star - best) >self.tol else (self.curr_patience + 1)
@@ -224,7 +208,7 @@ class GA:
         P = np.vstack([self.P_t, P3])
         f = np.concatenate([self.fitness_t, f3])
     
-        order = np.argsort(f)  # ascending (minimization)
+        order = np.argsort(f)
     
         k_elite = max(1, int(round(elite_frac * mu)))
         k_det   = int(round(pressure * (mu - k_elite)))
@@ -260,9 +244,7 @@ class GA:
         best = float(self.fitness_t.min())
         self.curr_patience = 0 if (self.y_star - best) > self.tol else (self.curr_patience + 1)
         self.y_star = best
-
-        
-            
+   
     def run_GA(self, n_gen, patience, p_c=0.8, p_m=0.10, elite_frac=0.10, pressure=0.80):
         while self.t < n_gen and self.curr_patience < patience:
             P1 = self.MP()
@@ -274,7 +256,7 @@ class GA:
         
 
 g = GA(P_size, tol=tol)
-g.run_GA(generations, patience, elite_frac=0.05, pressure=0.60, p_m=0.15)
+g.run_GA(generations, patience, elite_frac=0.1, p_m=0.1)
 print("the sol: ",g.y_star)
 print(g.P_t)
 print(g.fitness_t)
