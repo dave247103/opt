@@ -34,6 +34,8 @@
 </solvers>
 
 <script><![CDATA[
+# this file optimizes layer widths and refractive indecies of layers whose number is specified by N_LAYERS. To simulate more than 2 layers change N_LAYERS and add appropriate number of rectangles in Geomtry tab
+
 import numpy as np
 import matplotlib.pyplot as plt
 import os

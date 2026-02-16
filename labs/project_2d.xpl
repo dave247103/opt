@@ -22,7 +22,6 @@
     <stack>
       <rectangle name="layer1" material="mySi02" dx="1" dy="1"/>
       <rectangle name="layer2" material="mySi02" dx="1" dy="1"/>
-      <rectangle name="layer3" material="mySi02" dx="1" dy="1"/>
     </stack>
   </cartesian2d>
 </geometry>
@@ -35,11 +34,13 @@
 </solvers>
 
 <script><![CDATA[
+# this file optimizes layer widths and refractive indecies of layers whose number is specified by N_LAYERS. To simulate more than 2 layers change N_LAYERS and add appropriate number of rectangles in Geomtry tab
+
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-N_LAYERS = 3
+N_LAYERS = 2
 
 # opt
 lams = np.arange(400.0, 700.1, 1.0)
